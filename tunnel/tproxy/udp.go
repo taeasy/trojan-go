@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"syscall"
 	"unsafe"
+	"golang.org/x/sys/unix"
 )
 
 // ListenUDP will construct a new UDP listener
@@ -61,33 +62,29 @@ func ReadFromUDP(conn *net.UDPConn, b []byte) (int, *net.UDPAddr, *net.UDPAddr, 
 
 	var originalDst *net.UDPAddr
 	for _, msg := range msgs {
-		if (msg.Header.Level == syscall.SOL_IP || msg.Header.Level == syscall.SOL_IPV6) && msg.Header.Type == syscall.IP_RECVORIGDSTADDR {
-			originalDstRaw := &syscall.RawSockaddrInet4{}
-			if err = binary.Read(bytes.NewReader(msg.Data), binary.LittleEndian, originalDstRaw); err != nil {
-				return 0, nil, nil, fmt.Errorf("reading original destination address: %s", err)
+		
+		switch {
+		case msg.Header.Level == syscall.SOL_IP && msg.Header.Type == syscall.IP_ORIGDSTADDR:
+			pp := (*syscall.RawSockaddrInet4)(unsafe.Pointer(&msg.Data[0]))
+
+			p := (*[2]byte)(unsafe.Pointer(&pp.Port))
+
+			originalDst = &net.UDPAddr{
+				IP:   net.IPv4(pp.Addr[0], pp.Addr[1], pp.Addr[2], pp.Addr[3]),
+				Port: int(p[0])<<8 + int(p[1]),
 			}
 
-			switch originalDstRaw.Family {
-			case syscall.AF_INET:
-				pp := (*syscall.RawSockaddrInet4)(unsafe.Pointer(originalDstRaw))
-				p := (*[2]byte)(unsafe.Pointer(&pp.Port))
-				originalDst = &net.UDPAddr{
-					IP:   net.IPv4(pp.Addr[0], pp.Addr[1], pp.Addr[2], pp.Addr[3]),
-					Port: int(p[0])<<8 + int(p[1]),
-				}
-
-			case syscall.AF_INET6:
-				pp := (*syscall.RawSockaddrInet6)(unsafe.Pointer(originalDstRaw))
-				p := (*[2]byte)(unsafe.Pointer(&pp.Port))
-				originalDst = &net.UDPAddr{
-					IP:   net.IP(pp.Addr[:]),
-					Port: int(p[0])<<8 + int(p[1]),
-					Zone: strconv.Itoa(int(pp.Scope_id)),
-				}
-
-			default:
-				return 0, nil, nil, fmt.Errorf("original destination is an unsupported network family")
+		case msg.Header.Level == syscall.SOL_IPV6 && msg.Header.Type == unix.IPV6_ORIGDSTADDR:
+			pp := (*syscall.RawSockaddrInet6)(unsafe.Pointer(&msg.Data[0]))
+			p := (*[2]byte)(unsafe.Pointer(&pp.Port))
+			originalDst = &net.UDPAddr{
+				IP:   net.IP(pp.Addr[:]),
+				Port: int(p[0])<<8 + int(p[1]),
+				Zone: strconv.Itoa(int(pp.Scope_id)),
 			}
+
+		default:
+			return 0, nil, nil, fmt.Errorf("original destination is an unsupported network family")
 		}
 	}
 
