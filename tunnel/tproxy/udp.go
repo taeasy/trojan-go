@@ -4,8 +4,6 @@
 package tproxy
 
 import (
-	"bytes"
-	"encoding/binary"
 	"fmt"
 	"net"
 	"os"
@@ -82,10 +80,6 @@ func ReadFromUDP(conn *net.UDPConn, b []byte) (int, *net.UDPAddr, *net.UDPAddr, 
 				Port: int(p[0])<<8 + int(p[1]),
 				Zone: strconv.Itoa(int(pp.Scope_id)),
 			}
-
-		default:
-			return 0, nil, nil, fmt.Errorf("original destination is an unsupported network family")
-		}
 	}
 
 	if originalDst == nil {
